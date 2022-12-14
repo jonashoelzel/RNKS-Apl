@@ -1,82 +1,86 @@
-// Server side implementation of UDP client-server model
-#include <stdio.h>
-#include <stdlib.h>
-// #include <unistd.h>
-#include <io.h>
-#include <string.h>
-//#include <sys/types.h>
-#include <winsock2.h>
-
-// #include <sys/socket.h>
-// #include <arpa/inet.h>
-// #include <netinet/in.h>
-
 // https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-recvfrom
 
-#define PORT	 8080
-#define MAXLINE 1024
+#ifndef UNICODE
+#define UNICODE
+#endif
 
-// Driver code
-int main() 
+#define WIN32_LEAN_AND_MEAN
+
+#include <winsock2.h>
+#include <Ws2tcpip.h>
+#include <stdio.h>
+
+// Link with ws2_32.lib
+#pragma comment(lib, "Ws2_32.lib")
+
+int main()
 {
-	printf("Server...\n");
 
-	int result;
-	WSADATA wsaData;
-	SOCKET serverSocket;
-	char buffer[MAXLINE];
-	char* hello = "Hello from server";
-	struct sockaddr_in servaddr, cliaddr;
+    int iResult = 0;
 
-	// Initialize Winsock
-	result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-	if (result != NO_ERROR) {
-		wprintf(L"WSAStartup failed with error: %d\n", result);
-		return 1;
-	}
+    WSADATA wsaData;
 
-	// Create a socket for sending data
-	serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (serverSocket == INVALID_SOCKET)
-	{
-		wprintf(L"socket failed with error: %ld\n", WSAGetLastError());
-		WSACleanup();
-		exit(EXIT_FAILURE);
-	}
+    SOCKET RecvSocket;
+    struct sockaddr_in RecvAddr;
 
-	memset(&servaddr, 0, sizeof(servaddr));
-	memset(&cliaddr, 0, sizeof(cliaddr));
+    unsigned short Port = 27015;
 
-	// Filling server information
-	servaddr.sin_family = AF_INET; // IPv4/6
-	servaddr.sin_addr.s_addr = INADDR_ANY; // bind to any -> because it's a server
-	servaddr.sin_port = htons(PORT);
+    char RecvBuf[1024];
+    int BufLen = 1024;
 
-	// Bind the socket with the server address
-	if (bind(serverSocket, (const struct sockaddr*)&servaddr, sizeof(servaddr)) < 0)
-	{
-		perror("bind failed");
-		exit(EXIT_FAILURE);
-	}
+    struct sockaddr_in SenderAddr;
+    int SenderAddrSize = sizeof(SenderAddr);
 
-	int len, n;
+    //-----------------------------------------------
+    // Initialize Winsock
+    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (iResult != NO_ERROR) {
+        wprintf(L"WSAStartup failed with error %d\n", iResult);
+        return 1;
+    }
+    //-----------------------------------------------
+    // Create a receiver socket to receive datagrams
+    RecvSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (RecvSocket == INVALID_SOCKET) {
+        wprintf(L"socket failed with error %d\n", WSAGetLastError());
+        return 1;
+    }
+    //-----------------------------------------------
+    // Bind the socket to any address and the specified port.
+    RecvAddr.sin_family = AF_INET; // TODO: convert to IPv6
+    RecvAddr.sin_port = htons(Port);
+    RecvAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	len = sizeof(cliaddr); //len is value/result
+    iResult = bind(RecvSocket, (SOCKADDR*)&RecvAddr, sizeof(RecvAddr));
+    if (iResult != 0) {
+        wprintf(L"bind failed with error %d\n", WSAGetLastError());
+        return 1;
+    }
+    //-----------------------------------------------
+    // Call the recvfrom function to receive datagrams
+    // on the bound socket.
+    wprintf(L"Receiving datagrams...\n");
+    iResult = recvfrom(RecvSocket,
+        RecvBuf, BufLen, 0, (SOCKADDR*)&SenderAddr, &SenderAddrSize);
+    if (iResult == SOCKET_ERROR) {
+        wprintf(L"recvfrom failed with error %d\n", WSAGetLastError());
+    }
+    else {
+        puts(RecvBuf);
+    }
 
-	n = recvfrom(serverSocket, (char*)buffer, MAXLINE, MSG_WAITALL, (struct sockaddr*)&cliaddr, &len);
-	if (n < 0 || n > sizeof(buffer))
-	{
-		printf("Error while receiving: %s\n", n);
-		exit(EXIT_FAILURE);
-	}
-	buffer[n] = '\0';
+    //-----------------------------------------------
+    // Close the socket when finished receiving datagrams
+    wprintf(L"Finished receiving. Closing socket.\n");
+    iResult = closesocket(RecvSocket);
+    if (iResult == SOCKET_ERROR) {
+        wprintf(L"closesocket failed with error %d\n", WSAGetLastError());
+        return 1;
+    }
 
-	printf("Client : %s\n", buffer);
-	
-	sendto(serverSocket, (const char*)hello, strlen(hello), 0, (const struct sockaddr*)&cliaddr, len);
-	printf("Hello message sent.\n");
-
-	_close(serverSocket);
-
-	return 0;
+    //-----------------------------------------------
+    // Clean up and exit.
+    wprintf(L"Exiting.\n");
+    WSACleanup();
+    return 0;
 }
