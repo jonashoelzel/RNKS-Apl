@@ -45,32 +45,6 @@
 
 #define UNKNOWN_NAME "<unknown>"
 
-void Usage(char* ProgName)
-{
-    fprintf(stderr, "\nSimple socket sample client program.\n");
-    fprintf(stderr,
-        "\n%s [-s server] [-f family] [-t transport] [-p port] [-b bytes] [-n number]\n\n",
-        ProgName);
-    fprintf(stderr, "  server\tServer name or IP address.  (default: %s)\n",
-        (DEFAULT_SERVER == NULL) ? "loopback address" : DEFAULT_SERVER);
-    fprintf(stderr,
-        "  family\tOne of PF_INET, PF_INET6 or PF_UNSPEC.  (default: %s)\n",
-        (DEFAULT_FAMILY ==
-            PF_UNSPEC) ? "PF_UNSPEC" : ((DEFAULT_FAMILY ==
-                PF_INET) ? "PF_INET" : "PF_INET6"));
-    fprintf(stderr, "  transport\tEither TCP or UDP.  (default: %s)\n",
-        (DEFAULT_SOCKTYPE == SOCK_STREAM) ? "TCP" : "UDP");
-    fprintf(stderr, "  port\t\tPort on which to connect.  (default: %s)\n",
-        DEFAULT_PORT);
-    fprintf(stderr, "  bytes\t\tBytes of extra data to send.  (default: %d)\n",
-        DEFAULT_EXTRA);
-    fprintf(stderr, "  number\tNumber of sends to perform.  (default: 1)\n");
-    fprintf(stderr, "  (-n by itself makes client run in an infinite loop,");
-    fprintf(stderr, " Hit Ctrl-C to terminate)\n");
-    WSACleanup();
-    exit(1);
-}
-
 LPTSTR PrintError(int ErrorCode)
 {
     static TCHAR Message[1024];
@@ -115,125 +89,12 @@ int ReceiveAndPrint(SOCKET ConnSocket, char* Buffer, int BufLen)
     return AmountRead;
 }
 
-int main(int argc, char** argv)
-{
-	Sleep(1000);
-
-
-    char Buffer[BUFFER_SIZE], AddrName[NI_MAXHOST];
-
-    char* Server = DEFAULT_SERVER;
-    int Family = DEFAULT_FAMILY;
-    int SocketType = DEFAULT_SOCKTYPE;
-    char* Port = DEFAULT_PORT;
-
+SOCKET createAndConnectClient(char *ServerAddress, char *Port) {
+    char AddrName[NI_MAXHOST];
+    int RetVal;
     WSADATA wsaData;
-
-    int i, RetVal, AddrLen, AmountToSend;
-    int ExtraBytes = DEFAULT_EXTRA;
-    unsigned int Iteration, MaxIterations = 1;
-    BOOL RunForever = FALSE;
-
-    ADDRINFO Hints, * AddrInfo, * AI;
-    SOCKET ConnSocket = INVALID_SOCKET;
-    struct sockaddr_storage Addr;
-
-    if (argc > 1) {
-        for (i = 1; i < argc; i++) {
-            if (((argv[i][0] == '-') || (argv[i][0] == '/')) &&
-                (argv[i][1] != 0) && (argv[i][2] == 0)) {
-                switch (tolower(argv[i][1])) {
-                case 'f':
-                    if (!argv[i + 1])
-                        Usage(argv[0]);
-                    if (!STRICMP(argv[i + 1], "PF_INET"))
-                        Family = PF_INET;
-                    else if (!STRICMP(argv[i + 1], "AF_INET"))
-                        Family = PF_INET;
-                    else if (!STRICMP(argv[i + 1], "PF_INET6"))
-                        Family = PF_INET6;
-                    else if (!STRICMP(argv[i + 1], "AF_INET6"))
-                        Family = PF_INET6;
-                    else if (!STRICMP(argv[i + 1], "PF_UNSPEC"))
-                        Family = PF_UNSPEC;
-                    else if (!STRICMP(argv[i + 1], "AF_UNSPEC"))
-                        Family = PF_UNSPEC;
-                    else
-                        Usage(argv[0]);
-                    i++;
-                    break;
-
-                case 't':
-                    if (!argv[i + 1])
-                        Usage(argv[0]);
-                    if (!STRICMP(argv[i + 1], "TCP"))
-                        SocketType = SOCK_STREAM;
-                    else if (!STRICMP(argv[i + 1], "UDP"))
-                        SocketType = SOCK_DGRAM;
-                    else
-                        Usage(argv[0]);
-                    i++;
-                    break;
-
-                case 's':
-                    if (argv[i + 1]) {
-                        if (argv[i + 1][0] != '-') {
-                            Server = argv[++i];
-                            break;
-                        }
-                    }
-                    Usage(argv[0]);
-                    break;
-
-                case 'p':
-                    if (argv[i + 1]) {
-                        if (argv[i + 1][0] != '-') {
-                            Port = argv[++i];
-                            break;
-                        }
-                    }
-                    Usage(argv[0]);
-                    break;
-
-                case 'b':
-                    if (argv[i + 1]) {
-                        if (argv[i + 1][0] != '-') {
-                            ExtraBytes = atoi(argv[++i]);
-                            if (ExtraBytes >
-                                sizeof(Buffer) -
-                                sizeof("Message #4294967295"))
-                                Usage(argv[0]);
-                            break;
-                        }
-                    }
-                    Usage(argv[0]);
-                    break;
-
-                case 'n':
-                    if (argv[i + 1]) {
-                        if (argv[i + 1][0] != '-') {
-                            MaxIterations = atoi(argv[++i]);
-                            break;
-                        }
-                    }
-                    RunForever = TRUE;
-                    break;
-
-                default:
-                    Usage(argv[0]);
-                    break;
-                }
-            }
-            else
-                Usage(argv[0]);
-        }
-    }
-
-    Family = PF_INET6;
-    SocketType = SOCK_DGRAM;
-    Server = "::1";
-    Port = "50000";
-    MaxIterations = 3;
+    ADDRINFO Hints, *AddrInfo;
+    SOCKET ConnSocket;
 
     // Ask for Winsock version 2.2.
     if ((RetVal = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
@@ -245,109 +106,102 @@ int main(int argc, char** argv)
     //
     // By not setting the AI_PASSIVE flag in the hints to getaddrinfo, we're
     // indicating that we intend to use the resulting address(es) to connect
-    // to a service.  This means that when the Server parameter is NULL,
+    // to a service.  This means that when the ServerAddress parameter is NULL,
     // getaddrinfo will return one entry per allowed protocol family
     // containing the loopback address for that family.
     //
 
     memset(&Hints, 0, sizeof(Hints));
-    Hints.ai_family = Family;
-    Hints.ai_socktype = SocketType;
-    RetVal = getaddrinfo(Server, Port, &Hints, &AddrInfo);
+    Hints.ai_family = PF_INET6; // IPv6
+    Hints.ai_socktype = SOCK_DGRAM; // UDP
+    RetVal = getaddrinfo(ServerAddress, Port, &Hints, &AddrInfo);
     if (RetVal != 0) {
         fprintf(stderr,
             "Cannot resolve address [%s] and port [%s], error %d: %s\n",
-            Server, Port, RetVal, gai_strerror(RetVal));
+            ServerAddress, Port, RetVal, gai_strerror(RetVal));
         WSACleanup();
         return -1;
     }
-    //
-    // Try each address getaddrinfo returned, until we find one to which
-    // we can successfully connect.
-    //
-    for (AI = AddrInfo; AI != NULL; AI = AI->ai_next) {
 
-        // Open a socket with the correct address family for this address.
+    if (AddrInfo == NULL) {
+        fprintf(stderr, "Error: unable to connect to the server.\n");
+        WSACleanup();
+        return -1;
+    }
 
-        ConnSocket = socket(AI->ai_family, AI->ai_socktype, AI->ai_protocol);
+    // Open a socket with the correct address family for this address.
+    ConnSocket = socket(AddrInfo->ai_family, AddrInfo->ai_socktype, AddrInfo->ai_protocol);
 
-        //**** DEBUG
-        printf("socket call with family: %d socktype: %d, protocol: %d\n",
-            AI->ai_family, AI->ai_socktype, AI->ai_protocol);
-        if (ConnSocket == INVALID_SOCKET)
-            printf("socket call failed with %d\n", WSAGetLastError());
-        //**** DEBUG END
+    if (ConnSocket == INVALID_SOCKET) {
+        fprintf(stderr, "Error Opening socket, error %d: %s\n",
+            WSAGetLastError(), PrintError(WSAGetLastError()));
+        return -1;
+    }
 
-        if (ConnSocket == INVALID_SOCKET) {
-            fprintf(stderr, "Error Opening socket, error %d: %s\n",
-                WSAGetLastError(), PrintError(WSAGetLastError()));
-            continue;
-        }
-        //
-        // Notice that nothing in this code is specific to whether we 
-        // are using UDP or TCP.
-        //
-        // When connect() is called on a datagram socket, it does not 
-        // actually establish the connection as a stream (TCP) socket
-        // would. Instead, TCP/IP establishes the remote half of the
-        // (LocalIPAddress, LocalPort, RemoteIP, RemotePort) mapping.
-        // This enables us to use send() and recv() on datagram sockets,
-        // instead of recvfrom() and sendto().
-        //
+    printf("Attempting to connect to: %s\n", ServerAddress);
+    if (connect(ConnSocket, AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen) == SOCKET_ERROR) {
 
-        printf("Attempting to connect to: %s\n", Server ? Server : "localhost");
-        if (connect(ConnSocket, AI->ai_addr, (int)AI->ai_addrlen) != SOCKET_ERROR)
-            break;
-
-        i = WSAGetLastError();
-        if (getnameinfo(AI->ai_addr, (int)AI->ai_addrlen, AddrName,
+        RetVal = WSAGetLastError();
+        if (getnameinfo(AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen, AddrName,
             sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
             strcpy_s(AddrName, sizeof(AddrName), UNKNOWN_NAME);
         fprintf(stderr, "connect() to %s failed with error %d: %s\n",
-            AddrName, i, PrintError(i));
+            AddrName, RetVal, PrintError(RetVal));
         closesocket(ConnSocket);
-    }
-
-    if (AI == NULL) {
-        fprintf(stderr, "Fatal error: unable to connect to the server.\n");
-        WSACleanup();
         return -1;
     }
-    //
-    // This demonstrates how to determine to where a socket is connected.
-    //
-    AddrLen = sizeof(Addr);
-    if (getpeername(ConnSocket, (LPSOCKADDR)&Addr, (int*)&AddrLen) == SOCKET_ERROR) {
+
+    freeaddrinfo(AddrInfo);
+    return ConnSocket;
+}
+
+int socketConnected(SOCKET socket) {
+    char AddrName[NI_MAXHOST];
+    struct sockaddr_storage Addr;
+    int addrLen = sizeof(Addr);
+
+    if (getpeername(socket, (LPSOCKADDR)&Addr, (int*)&addrLen) == SOCKET_ERROR) {
         fprintf(stderr, "getpeername() failed with error %d: %s\n",
             WSAGetLastError(), PrintError(WSAGetLastError()));
+
+        return 0;
     }
     else {
-        if (getnameinfo((LPSOCKADDR)&Addr, AddrLen, AddrName,
-            sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
+        if (getnameinfo((LPSOCKADDR)&Addr, addrLen, AddrName, sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
             strcpy_s(AddrName, sizeof(AddrName), UNKNOWN_NAME);
-        printf("Connected to %s, port %d, protocol %s, protocol family %s\n",
-            AddrName, ntohs(SS_PORT(&Addr)),
-            (AI->ai_socktype == SOCK_STREAM) ? "TCP" : "UDP",
-            (AI->ai_family == PF_INET) ? "PF_INET" : "PF_INET6");
-    }
+        printf("Connected to %s, port %d\n", AddrName, ntohs(SS_PORT(&Addr)));
 
-    // We are done with the address info chain, so we can free it.
-    freeaddrinfo(AddrInfo);
-
-    //
-    // Find out what local address and port the system picked for us.
-    //
-    AddrLen = sizeof(Addr);
-    if (getsockname(ConnSocket, (LPSOCKADDR)&Addr, &AddrLen) == SOCKET_ERROR) {
-        fprintf(stderr, "getsockname() failed with error %d: %s\n",
-            WSAGetLastError(), PrintError(WSAGetLastError()));
+        return 1;
     }
-    else {
-        if (getnameinfo((LPSOCKADDR)&Addr, AddrLen, AddrName,
-            sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-            strcpy_s(AddrName, sizeof(AddrName), UNKNOWN_NAME);
-        printf("Using local address %s, port %d\n",
-            AddrName, ntohs(SS_PORT(&Addr)));
+}
+
+int main(int argc, char** argv)
+{
+	Sleep(1000);
+
+    char Buffer[BUFFER_SIZE], AddrName[NI_MAXHOST];
+
+    char* ServerAddress = DEFAULT_SERVER;
+    char* Port = DEFAULT_PORT;
+    
+    int AddrLen;
+    struct sockaddr_storage Addr;
+    SOCKET ConnSocket = INVALID_SOCKET;
+
+    int RetVal, AmountToSend;
+    int ExtraBytes = DEFAULT_EXTRA;
+    unsigned int Iteration, MaxIterations = 1;
+    BOOL RunForever = FALSE;
+
+    ServerAddress = "::1";
+    Port = "50000";
+
+    ConnSocket = createAndConnectClient(ServerAddress, Port);
+    if (ConnSocket == INVALID_SOCKET)
+        return -1; // Socket not created 
+
+    if (!socketConnected(ConnSocket)) {
+        return -2; // Socket not connected
     }
 
     //
@@ -356,9 +210,8 @@ int main(int argc, char** argv)
     for (Iteration = 0; RunForever || Iteration < MaxIterations; Iteration++) {
 
         // Compose a message to send.
-        AmountToSend =
-            sprintf_s(Buffer, sizeof(Buffer), "Message #%u", Iteration + 1);
-        for (i = 0; i < ExtraBytes; i++) {
+        AmountToSend = sprintf_s(Buffer, sizeof(Buffer), "Message #%u", Iteration + 1);
+        for (int i = 0; i < ExtraBytes; i++) {
             Buffer[AmountToSend++] = (char)((i & 0x3f) + 0x20);
         }
 
@@ -386,202 +239,7 @@ int main(int argc, char** argv)
     printf("Done sending\n");
     shutdown(ConnSocket, SD_SEND);
 
-    //
-    // Since TCP does not preserve message boundaries, there may still
-    // be more data arriving from the server.  So we continue to receive
-    // data until the server closes the connection.
-    //
-    if (SocketType == SOCK_STREAM)
-        while (ReceiveAndPrint(ConnSocket, Buffer, sizeof(Buffer)) != 0);
-
     closesocket(ConnSocket);
     WSACleanup();
     return 0;
 }
-
-
-/*
-// https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-sendto
-
-#ifndef UNICODE
-#define UNICODE
-#endif
-
-#define WIN32_LEAN_AND_MEAN
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-
-#include <winsock2.h>
-#include <Ws2tcpip.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-// Needed for the Windows 2000 IPv6 Tech Preview.
-#if (_WIN32_WINNT == 0x0500)
-#include <tpipv6.h>
-#endif
-
-#define STRICMP _stricmp
-
-// Link with ws2_32.lib
-#pragma comment(lib, "Ws2_32.lib")
-
-
-LPTSTR PrintError(int ErrorCode)
-{
-    static TCHAR Message[1024];
-
-    // If this program was multithreaded, we'd want to use
-    // FORMAT_MESSAGE_ALLOCATE_BUFFER instead of a static buffer here.
-    // (And of course, free the buffer when we were done with it)
-
-    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS |
-        FORMAT_MESSAGE_MAX_WIDTH_MASK,
-        NULL, ErrorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        Message, 1024, NULL);
-    return Message;
-}
-
-int main()
-{
-    Sleep(1000);
-
-    int iResult;
-    WSADATA wsaData;
-
-    SOCKET SendSocket = INVALID_SOCKET;
-    struct sockaddr_in6 RecvAddr;
-    char* ServerIpAddr = "::1";
-    struct sockaddr_storage Addr;
-
-    ADDRINFO *SendAddr;
-    ADDRINFO HintAddr;
-
-    unsigned short Port = 50000;
-
-    char SendBuf[1024], AddrName[1024];
-    int BufLen = 1024;
-
-    const char* text = "Hello this was sent over UDP!";
-    strcpy_s(SendBuf, sizeof(SendBuf), text);
-
-    //----------------------
-    // Initialize Winsock
-    iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (iResult != NO_ERROR) {
-        wprintf(L"WSAStartup failed with error: %d\n", iResult);
-        return 1;
-    }
-
-    HintAddr.ai_family = PF_INET6;
-    HintAddr.ai_socktype = SOCK_DGRAM;
-
-    iResult = getaddrinfo(ServerIpAddr, Port, &HintAddr, &SendAddr);
-    if (iResult != 0) {
-        fprintf(stderr, "Cannot resolve address [%s] and port [%s], error %d: %s\n",
-            ServerIpAddr, Port, iResult, gai_strerror(iResult));
-        WSACleanup();
-        return -1;
-    }
-
-    //---------------------------------------------
-    // Create a socket for sending data
-    SendSocket = socket(SendAddr->ai_family, SendAddr->ai_socktype, IPPROTO_UDP);
-    if (SendSocket == INVALID_SOCKET) {
-        wprintf(L"socket failed with error: %ld\n", WSAGetLastError());
-        WSACleanup();
-        return 1;
-    }
-
-    int e = WSAGetLastError();
-    printf("Attempting to connect to: %s\n", ServerIpAddr);
-    if (connect(SendSocket, SendAddr->ai_addr, (int) SendAddr->ai_addrlen) == SOCKET_ERROR) {
-        if (getnameinfo(SendAddr->ai_addr, (int) SendAddr->ai_addrlen, AddrName, sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-            strcpy_s(AddrName, sizeof(AddrName), "<unknown>");
-
-        fprintf(stderr, "connect() to %s failed with error %d: %s\n",
-            AddrName, e, PrintError(e));
-        closesocket(SendSocket);
-        return -1;
-    }
-
-    
-    int AddrLen = sizeof(Addr);
-    if (getpeername(SendSocket, (LPSOCKADDR)&Addr, (int*)&AddrLen) == SOCKET_ERROR) {
-        fprintf(stderr, "getpeername() failed with error %d: %s\n",
-            WSAGetLastError(), PrintError(WSAGetLastError()));
-        return -1;
-    }
-    if (getnameinfo((LPSOCKADDR)&Addr, AddrLen, AddrName, sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-        strcpy_s(AddrName, sizeof(AddrName), "<unknown>");
-
-    printf(L"Connected to %s, port %d\n",
-        AddrName, ntohs(SS_PORT(&Addr)));
-
-
-    AddrLen = sizeof(Addr);
-    if (getsockname(SendSocket, (LPSOCKADDR)&Addr, &AddrLen) == SOCKET_ERROR) {
-        fprintf(stderr, "getsockname() failed with error %d: %s\n",
-            WSAGetLastError(), PrintError(WSAGetLastError()));
-        return -1;
-    }
-    if (getnameinfo((LPSOCKADDR)&Addr, AddrLen, AddrName,
-        sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-        strcpy_s(AddrName, sizeof(AddrName), "<unknown>");
-    printf("Using local address %s, port %d\n",
-        AddrName, ntohs(SS_PORT(&Addr)));
-
-
-    // Compose a message to send.
-    int AmountToSend = sprintf_s(SendBuf, sizeof(SendBuf), "Message #%u", 1);
-
-    // Send the message.  Since we are using a blocking socket, this
-    // call shouldn't return until it's able to send the entire amount.
-    iResult = send(SendSocket, SendBuf, AmountToSend, 0);
-    if (iResult == SOCKET_ERROR) {
-        fprintf(stderr, "send() failed with error %d: %s\n",
-            WSAGetLastError(), PrintError(WSAGetLastError()));
-        WSACleanup();
-        return -1;
-    }
-
-    printf("Sent %d bytes (out of %d bytes) of data: [%.*s]\n",
-        iResult, AmountToSend, AmountToSend, SendBuf);
-
-
-    //---------------------------------------------
-    // Set up the RecvAddr structure with the IP address of
-    // the receiver (in this example case "192.168.1.1")
-    // and the specified port number.
-    //RecvAddr.sin6_family = PF_INET6;
-    //RecvAddr.sin6_port = htons(Port);
-    //inet_pton(PF_INET6, "::1", &RecvAddr.sin6_addr);
-    //RecvAddr.sin6_addr = 
-    // RecvAddr.sin_addr.s_addr = inet_pton(RecvAddr.sin_family, "127.0.0.1", &RecvAddr.sin_addr);
-
-    //---------------------------------------------
-    // Send a datagram to the receiver
-    //wprintf(L"Sending a datagram to the receiver...\n");
-    //iResult = sendto(SendSocket,
-    //    SendBuf, BufLen, 0, (SOCKADDR*)&RecvAddr, sizeof(RecvAddr));
-    //if (iResult == SOCKET_ERROR) {
-    //    wprintf(L"sendto failed with error: %d\n", WSAGetLastError());
-    //    closesocket(SendSocket);
-    //    WSACleanup();
-    //    return 1;
-    //}
-    ////---------------------------------------------
-    //// When the application is finished sending, close the socket.
-    //wprintf(L"Finished sending. Closing socket.\n");
-    //iResult = closesocket(SendSocket);
-    //if (iResult == SOCKET_ERROR) {
-    //    wprintf(L"closesocket failed with error: %d\n", WSAGetLastError());
-    //    WSACleanup();
-    //    return 1;
-    //}
-    ////---------------------------------------------
-    //// Clean up and quit.
-    //wprintf(L"Exiting.\n");
-    //WSACleanup();
-    //return 0;
-}
-*/
