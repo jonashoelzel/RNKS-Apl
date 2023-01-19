@@ -63,6 +63,7 @@ int main(int argc, char** argv)
     char Buffer[BUFFER_SIZE], Hostname[NI_MAXHOST];
     int SocketType = DEFAULT_SOCKTYPE;
     char* Port = DEFAULT_PORT;
+    char* Dateiname;
     char* Address = NULL;
     int NumSocks, RetVal, FromLen, AmountRead;
     //    int idx;
@@ -72,11 +73,43 @@ int main(int argc, char** argv)
     SOCKET ServSock;
     fd_set SockSet;
     
-    Address = "::1";
-    Port = "50000";
+    //Address = "::1";
+    //Port = "50000";
     
     SocketType = SOCK_DGRAM;
     
+    if (argc < 1) {
+        printf("No arguments given");
+        return -1;
+    }
+    for (int i = 1; i < argc; i++) {
+        if ((argv[i][0] == '-') || (argv[i][0] == '/') &&
+            (argv[i][1] != 0) && (argv[i][2] == 0)) {
+            switch (tolower(argv[i][1]))
+            {
+            case 'f':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        Dateiname = argv[++i];
+                        break;
+                    }
+                }
+            case 'p':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        Port = argv[++i];
+                        break;
+                    }
+                }
+            default:
+                printf("Invalid parameter");
+                break;
+            }
+        }
+    }
+
+
+
     // Ask for Winsock version 2.2.
     if ((RetVal = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
         fprintf(stderr, "WSAStartup failed with error %d: %s\n",

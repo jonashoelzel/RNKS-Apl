@@ -183,6 +183,7 @@ int main(int argc, char** argv)
 
     char* ServerAddress = DEFAULT_SERVER;
     char* Port = DEFAULT_PORT;
+    char* Dateiname;
     
     int AddrLen;
     struct sockaddr_storage Addr;
@@ -193,8 +194,44 @@ int main(int argc, char** argv)
     unsigned int Iteration, MaxIterations = 1;
     BOOL RunForever = FALSE;
 
-    ServerAddress = "::1";
-    Port = "50000";
+
+    if (argc < 1) {
+        printf("No arguments given");
+        return -1;
+    }
+    for (int i = 1; i < argc; i++) {
+        if ((argv[i][0] == '-') || (argv[i][0] == '/') &&
+            (argv[i][1] != 0) && (argv[i][2] == 0)) {
+            switch (tolower(argv[i][1]))
+            {
+            case 'f':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        Dateiname = argv[++i];
+                        break;
+                    }
+                }
+            case 'a':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        ServerAddress = argv[++i];
+                        break;
+                    }
+                }
+            case 'p':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        Port = argv[++i];
+                        break;
+                    }
+                }
+            default:
+                printf("Invalid parameter");
+                break;
+            }
+        }
+    }
+    
 
     ConnSocket = createAndConnectClient(ServerAddress, Port);
     if (ConnSocket == INVALID_SOCKET)
