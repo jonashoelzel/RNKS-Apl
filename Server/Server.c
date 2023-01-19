@@ -20,6 +20,7 @@
 #include <mstcpip.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "../Package.h"
 
 // Needed for the Windows 2000 IPv6 Tech Preview.
 #if (_WIN32_WINNT == 0x0500)
@@ -41,7 +42,7 @@
 #define DEFAULT_FAMILY     PF_UNSPEC    // Accept either IPv4 or IPv6
 #define DEFAULT_SOCKTYPE   SOCK_STREAM  // TCP
 #define DEFAULT_PORT       "5001"       // Arbitrary, albiet a historical test port
-#define BUFFER_SIZE        64   // Set very small for demonstration purposes
+#define BUFFER_SIZE        5000
 
 LPSTR PrintError(int ErrorCode)
 {
@@ -167,8 +168,7 @@ int main(int argc, char** argv)
         // we get from a recvfrom() should match exactly the amount of
         // data the client sent in the corresponding sendto().
         //
-        AmountRead = recvfrom(ServSock, Buffer, sizeof(Buffer), 0,
-            (LPSOCKADDR)&From, &FromLen);
+        AmountRead = recvfrom(ServSock, Buffer, sizeof(Buffer), 0, (LPSOCKADDR)&From, &FromLen);
         if (AmountRead == SOCKET_ERROR) {
             fprintf(stderr, "recvfrom() failed with error %d: %s\n",
                 WSAGetLastError(), PrintError(WSAGetLastError()));
@@ -190,11 +190,15 @@ int main(int argc, char** argv)
             strcpy_s(Hostname, NI_MAXHOST, "<unknown>");
         }
 
-        printf("Received a %d byte datagram from %s: [%.*s]\n",
-            AmountRead, Hostname, AmountRead, Buffer);
+		Package* package = (Package*)Buffer;
+        
+        printf("Received a %d byte datagram from %s seqNr was %d: [%.*s]\n",
+            AmountRead, Hostname, AmountRead, package->seqNr, package->column);
+        
         printf("Echoing same data back to client\n");
 
-        RetVal = sendto(ServSock, Buffer, AmountRead, 0,
+        
+        RetVal = sendto(ServSock, package->column, AmountRead, 0,
             (LPSOCKADDR)&From, FromLen);
         if (RetVal == SOCKET_ERROR) {
             fprintf(stderr, "send() failed with error %d: %s\n",

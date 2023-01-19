@@ -21,6 +21,7 @@
 #if (_WIN32_WINNT == 0x0500)
 #include <tpipv6.h>
 #endif
+#include "../Package.h"
 
 // Link with ws2_32.lib
 #pragma comment(lib, "Ws2_32.lib")
@@ -193,6 +194,7 @@ int main(int argc, char** argv)
     unsigned int Iteration, MaxIterations = 1;
     BOOL RunForever = FALSE;
 
+	char* DateiName = "Example.txt";
     ServerAddress = "::1";
     Port = "50000";
 
@@ -204,20 +206,32 @@ int main(int argc, char** argv)
         return -2; // Socket not connected
     }
 
+    
+    // Open file
+    // 
+    FILE* file;
+    errno_t err = fopen_s(&file, DateiName, "r");
+    if (err != 0) {
+        printf("\n Unable to open : %s ", DateiName);
+        return -1;
+    }
+
+	char line[BUFFER_SIZE];
+    
+    
     //
     // Send and receive in a loop for the requested number of iterations.
     //
-    for (Iteration = 0; RunForever || Iteration < MaxIterations; Iteration++) {
-
+    for (int i = 0; fgets(line, sizeof(line), file); i++) {
+		Package package;
+        package.seqNr = i;
+        
         // Compose a message to send.
-        AmountToSend = sprintf_s(Buffer, sizeof(Buffer), "Message #%u", Iteration + 1);
-        for (int i = 0; i < ExtraBytes; i++) {
-            Buffer[AmountToSend++] = (char)((i & 0x3f) + 0x20);
-        }
+		AmountToSend = sprintf_s(package.column, sizeof(package.column), line) + 2 * sizeof(int);
 
         // Send the message.  Since we are using a blocking socket, this
         // call shouldn't return until it's able to send the entire amount.
-        RetVal = send(ConnSocket, Buffer, AmountToSend, 0);
+        RetVal = send(ConnSocket, &package, AmountToSend, 0);
         if (RetVal == SOCKET_ERROR) {
             fprintf(stderr, "send() failed with error %d: %s\n",
                 WSAGetLastError(), PrintError(WSAGetLastError()));
