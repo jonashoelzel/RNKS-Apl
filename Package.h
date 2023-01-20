@@ -1,9 +1,7 @@
-//#ifndef BUFFER_SIZE
-#define BUFFER_SIZE 2048
-//#endif // !BUFFER_SIZE
+#define PACKAGE_BUFFER_SIZE 16
 
 typedef struct Package {
 	int seqNr;
-	int checkSum;
-	char column[BUFFER_SIZE];
+	unsigned short checkSum;
+	char column[PACKAGE_BUFFER_SIZE];
 } Package;

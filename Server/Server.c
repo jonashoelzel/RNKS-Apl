@@ -1,15 +1,3 @@
-//
-// server.c - Simple TCP/UDP server using Winsock 2.2
-//
-//      This is a part of the Microsoft<entity type="reg"/> Source Code Samples.
-//      Copyright 1996 - 2000 Microsoft Corporation.
-//      All rights reserved.
-//      This source code is only intended as a supplement to
-//      Microsoft Development Tools and/or WinHelp<entity type="reg"/> documentation.
-//      See these sources for detailed information regarding the
-//      Microsoft samples programs.
-//
-
 #undef UNICODE
 
 #define WIN32_LEAN_AND_MEAN
@@ -21,6 +9,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "../Package.h"
+#include "../checksum.h"
+#include "../ackn.h"
 
 // Needed for the Windows 2000 IPv6 Tech Preview.
 #if (_WIN32_WINNT == 0x0500)
@@ -30,27 +20,12 @@
 // Link with ws2_32.lib
 #pragma comment(lib, "Ws2_32.lib")
 
-#define STRICMP _stricmp
-
-//
-// This code assumes that at the transport level, the system only supports
-// one stream protocol (TCP) and one datagram protocol (UDP).  Therefore,
-// specifying a socket type of SOCK_STREAM is equivalent to specifying TCP
-// and specifying a socket type of SOCK_DGRAM is equivalent to specifying UDP.
-//
-
-#define DEFAULT_FAMILY     PF_UNSPEC    // Accept either IPv4 or IPv6
-#define DEFAULT_SOCKTYPE   SOCK_STREAM  // TCP
-#define DEFAULT_PORT       "5001"       // Arbitrary, albiet a historical test port
-#define BUFFER_SIZE        5000
+#define BUFFER_SIZE              65536
+#define DEFAULT_STRING_LENGTH    256
 
 LPSTR PrintError(int ErrorCode)
 {
     static char Message[1024];
-
-    // If this program was multithreaded, we'd want to use
-    // FORMAT_MESSAGE_ALLOCATE_BUFFER instead of a static buffer here.
-    // (And of course, free the buffer when we were done with it)
 
     FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS |
         FORMAT_MESSAGE_MAX_WIDTH_MASK, NULL, ErrorCode,
@@ -59,25 +34,81 @@ LPSTR PrintError(int ErrorCode)
     return Message;
 }
 
+void usage() {
+    printf("usage: [-f filename] [-p port]");
+}
+
+void writeToFile(char* FileName, char* str) {
+    // Open or create File
+    FILE* file;
+    if (fopen_s(&file, FileName, "a+") != 0) {
+        printf("Error opening file\n");
+        exit(-1);
+    }
+
+    fwrite(str, sizeof(char), strlen(str), file);
+
+    fclose(file);
+}
+
+void parseArgs(int argc, char** argv, char* FileName, char* Port) {
+    if (argc < 1) {
+        printf("No arguments given");
+        usage();
+        return -1;
+    }
+    for (int i = 1; i < argc; i++) {
+        if ((argv[i][0] == '-') || (argv[i][0] == '/') &&
+            (argv[i][1] != 0) && (argv[i][2] == 0)) {
+            switch (tolower(argv[i][1]))
+            {
+            case 'f':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        strcpy_s(FileName, DEFAULT_STRING_LENGTH, argv[++i]);
+                        break;
+                    }
+                    else usage();
+                }
+                else usage();
+            case 'p':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        strcpy_s(Port, DEFAULT_STRING_LENGTH, argv[++i]);
+                        break;
+                    }
+                    else usage();
+                }
+                else usage();
+            default:
+                printf("Invalid parameter");
+                usage();
+                break;
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     char Buffer[BUFFER_SIZE], Hostname[NI_MAXHOST];
-    int SocketType = DEFAULT_SOCKTYPE;
-    char* Port = DEFAULT_PORT;
     char* Address = NULL;
-    int NumSocks, RetVal, FromLen, AmountRead;
-    //    int idx;
+    char Port[DEFAULT_STRING_LENGTH];
+    char FileName[DEFAULT_STRING_LENGTH];
+    int RetVal, FromLen, AmountRead;
     SOCKADDR_STORAGE From;
     WSADATA wsaData;
     ADDRINFO Hints, * AddrInfo;
     SOCKET ServSock;
     fd_set SockSet;
+
     
-    Address = "::1";
-    Port = "50000";
-    
-    SocketType = SOCK_DGRAM;
-    
+	parseArgs(argc, argv, FileName, Port);
+	if (strlen(FileName) == 0 || strlen(Port) == 0) {
+        printf("File Name or Port not specified!");
+        return -1;
+    }
+        
     // Ask for Winsock version 2.2.
     if ((RetVal = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
         fprintf(stderr, "WSAStartup failed with error %d: %s\n",
@@ -90,6 +121,8 @@ int main(int argc, char** argv)
     Hints.ai_family = PF_INET6; // IPv6
     Hints.ai_socktype = SOCK_DGRAM; // UDP
     Hints.ai_flags = AI_NUMERICHOST | AI_PASSIVE; // Address will be binded
+
+    // Get AddrInfo
     RetVal = getaddrinfo(Address, Port, &Hints, &AddrInfo);
     if (RetVal != 0) {
         fprintf(stderr, "getaddrinfo failed with error %d: %s\n",
@@ -98,7 +131,7 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    // Open a socket with the correct address family for this address.
+    // Open a socket for this address
     ServSock = socket(AddrInfo->ai_family, AddrInfo->ai_socktype, AddrInfo->ai_protocol);
     if (ServSock == INVALID_SOCKET) {
         fprintf(stderr, "socket() failed with error %d: %s\n",
@@ -106,51 +139,34 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    if ((AddrInfo->ai_family == PF_INET6) &&
-        IN6_IS_ADDR_LINKLOCAL((IN6_ADDR*)INETADDR_ADDRESS(AddrInfo->ai_addr)) &&
+    // Check if Address is a link-local-address
+    if (IN6_IS_ADDR_LINKLOCAL((IN6_ADDR*)INETADDR_ADDRESS(AddrInfo->ai_addr)) &&
         (((SOCKADDR_IN6*)(AddrInfo->ai_addr))->sin6_scope_id == 0)
         ) {
         fprintf(stderr,
             "IPv6 link local addresses should specify a scope ID!\n");
     }
     
+    // Bind to Socket
     if (bind(ServSock, AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen) == SOCKET_ERROR) {
         fprintf(stderr, "bind() failed with error %d: %s\n",
             WSAGetLastError(), PrintError(WSAGetLastError()));
         closesocket(ServSock);
         return -1;
     }
+    freeaddrinfo(AddrInfo);
 
+    
     printf("'Listening' on port %s\n", Port);
 
-    freeaddrinfo(AddrInfo);
-    
-    NumSocks = 1;
-
-    //
-    // We now put the server into an eternal loop,
-    // serving requests as they arrive.
-    //
+	// Loop forever and serve requests.
     FD_ZERO(&SockSet);
     while (1) {
-
-        FromLen = sizeof(From);
-
-        //
-        // For connection orientated protocols, we will handle the
-        // packets received from a connection collectively.  For datagram
-        // protocols, we have to handle each datagram individually.
-        //
-
-        //
-        // Check to see if we have any sockets remaining to be served
-        // from previous time through this loop.  If not, call select()
-        // to wait for a connection request or a datagram to arrive.
-        //
+        
         if (!FD_ISSET(ServSock, &SockSet)) {
             FD_SET(ServSock, &SockSet);
             
-            if (select(NumSocks, &SockSet, 0, 0, 0) == SOCKET_ERROR) {
+            if (select(1, &SockSet, 0, 0, 0) == SOCKET_ERROR) {
                 fprintf(stderr, "select() failed with error %d: %s\n",
                     WSAGetLastError(), PrintError(WSAGetLastError()));
                 WSACleanup();
@@ -162,12 +178,7 @@ int main(int argc, char** argv)
             FD_CLR(ServSock, &SockSet);
         }
         
-        
-        //
-        // Since UDP maintains message boundaries, the amount of data
-        // we get from a recvfrom() should match exactly the amount of
-        // data the client sent in the corresponding sendto().
-        //
+        FromLen = sizeof(From);
         AmountRead = recvfrom(ServSock, Buffer, sizeof(Buffer), 0, (LPSOCKADDR)&From, &FromLen);
         if (AmountRead == SOCKET_ERROR) {
             fprintf(stderr, "recvfrom() failed with error %d: %s\n",
@@ -176,7 +187,6 @@ int main(int argc, char** argv)
             break;
         }
         if (AmountRead == 0) {
-            // This should never happen on an unconnected socket, but...
             printf("recvfrom() returned zero, aborting\n");
             closesocket(ServSock);
             break;
@@ -192,20 +202,26 @@ int main(int argc, char** argv)
 
 		Package* package = (Package*)Buffer;
         
-        printf("Received a %d byte datagram from %s seqNr was %d: [%.*s]\n",
-            AmountRead, Hostname, AmountRead, package->seqNr, package->column);
-        
-        printf("Echoing same data back to client\n");
+		writeToFile(FileName, package->column);
 
+        unsigned short calcedCS = checksum(&package->column, sizeof(package->column));
         
-        RetVal = sendto(ServSock, package->column, AmountRead, 0,
-            (LPSOCKADDR)&From, FromLen);
-        if (RetVal == SOCKET_ERROR) {
-            fprintf(stderr, "send() failed with error %d: %s\n",
-                WSAGetLastError(), PrintError(WSAGetLastError()));
-        }
+		if (calcedCS != package->checkSum) {
+			printf("Checksum error for Package: %d, expected %d, got %d\n", package->seqNr, package->checkSum, calcedCS);
+		}
+		else {
+			printf("Checksum OK for Package: %d with Data: [%.*s]\n", package->seqNr, sizeof(package->column), package->column);
+
+            Ackn ackn;
+			ackn.seqNr = package->seqNr;
+            
+            RetVal = sendto(ServSock, &ackn, sizeof(ackn), 0, (LPSOCKADDR)&From, FromLen);
+            if (RetVal == SOCKET_ERROR) {
+                fprintf(stderr, "send ackn failed with error %d: %s\n",
+                    WSAGetLastError(), PrintError(WSAGetLastError()));
+            }
+		}
         
     }
-
     return 0;
 }

@@ -14,45 +14,28 @@
 #include <ws2tcpip.h>
 #include <stdio.h>
 #include <stdlib.h>
-//#include <string.h>
+#include <string.h>
 
 
 // Needed for the Windows 2000 IPv6 Tech Preview.
 #if (_WIN32_WINNT == 0x0500)
 #include <tpipv6.h>
 #endif
+
 #include "../Package.h"
+#include "../checksum.h"
+#include "../ackn.h"
 
 // Link with ws2_32.lib
 #pragma comment(lib, "Ws2_32.lib")
 
-#define STRICMP _stricmp
-
-
-//
-// This code assumes that at the transport level, the system only supports
-// one stream protocol (TCP) and one datagram protocol (UDP).  Therefore,
-// specifying a socket type of SOCK_STREAM is equivalent to specifying TCP
-// and specifying a socket type of SOCK_DGRAM is equivalent to specifying UDP.
-//
-
-#define DEFAULT_SERVER     NULL // Will use the loopback interface
-#define DEFAULT_FAMILY     PF_UNSPEC    // Accept either IPv4 or IPv6
-#define DEFAULT_SOCKTYPE   SOCK_STREAM  // TCP
-#define DEFAULT_PORT       "5001"       // Arbitrary, albiet a historical test port
-#define DEFAULT_EXTRA      0    // Number of "extra" bytes to send
-
-#define BUFFER_SIZE        65536
-
-#define UNKNOWN_NAME "<unknown>"
+#define BUFFER_SIZE              65536
+#define DEFAULT_STRING_LENGTH    256
+#define FILE_LINE_BUFFER_SIZE    2048
 
 LPTSTR PrintError(int ErrorCode)
 {
     static TCHAR Message[1024];
-
-    // If this program was multithreaded, we'd want to use
-    // FORMAT_MESSAGE_ALLOCATE_BUFFER instead of a static buffer here.
-    // (And of course, free the buffer when we were done with it)
 
     FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS |
         FORMAT_MESSAGE_MAX_WIDTH_MASK,
@@ -60,6 +43,7 @@ LPTSTR PrintError(int ErrorCode)
         Message, 1024, NULL);
     return Message;
 }
+
 
 int ReceiveAndPrint(SOCKET ConnSocket, char* Buffer, int BufLen)
 {
@@ -104,13 +88,6 @@ SOCKET createAndConnectClient(char *ServerAddress, char *Port) {
         WSACleanup();
         return -1;
     }
-    //
-    // By not setting the AI_PASSIVE flag in the hints to getaddrinfo, we're
-    // indicating that we intend to use the resulting address(es) to connect
-    // to a service.  This means that when the ServerAddress parameter is NULL,
-    // getaddrinfo will return one entry per allowed protocol family
-    // containing the loopback address for that family.
-    //
 
     memset(&Hints, 0, sizeof(Hints));
     Hints.ai_family = PF_INET6; // IPv6
@@ -145,7 +122,7 @@ SOCKET createAndConnectClient(char *ServerAddress, char *Port) {
         RetVal = WSAGetLastError();
         if (getnameinfo(AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen, AddrName,
             sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-            strcpy_s(AddrName, sizeof(AddrName), UNKNOWN_NAME);
+            strcpy_s(AddrName, sizeof(AddrName), "<unknown>");
         fprintf(stderr, "connect() to %s failed with error %d: %s\n",
             AddrName, RetVal, PrintError(RetVal));
         closesocket(ConnSocket);
@@ -169,34 +146,75 @@ int socketConnected(SOCKET socket) {
     }
     else {
         if (getnameinfo((LPSOCKADDR)&Addr, addrLen, AddrName, sizeof(AddrName), NULL, 0, NI_NUMERICHOST) != 0)
-            strcpy_s(AddrName, sizeof(AddrName), UNKNOWN_NAME);
+            strcpy_s(AddrName, sizeof(AddrName), "<unknown>");
         printf("Connected to %s, port %d\n", AddrName, ntohs(SS_PORT(&Addr)));
 
         return 1;
     }
 }
 
+void parseArgs(int argc, char* argv[], char* FileName, char* ServerAddress, char* Port) {
+    if (argc < 1) {
+        printf("No arguments given");
+        return -1;
+    }
+    for (int i = 1; i < argc; i++) {
+        if ((argv[i][0] == '-') || (argv[i][0] == '/') &&
+            (argv[i][1] != 0) && (argv[i][2] == 0)) {
+            switch (tolower(argv[i][1]))
+            {
+            case 'f':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        strcpy_s(FileName, DEFAULT_STRING_LENGTH, argv[++i]);
+                        break;
+                    }
+                }
+            case 'a':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        strcpy_s(ServerAddress, DEFAULT_STRING_LENGTH, argv[++i]);
+                        break;
+                    }
+                }
+            case 'p':
+                if (argv[i + 1]) {
+                    if (argv[i + 1][0] != '-') {
+                        strcpy_s(Port, DEFAULT_STRING_LENGTH, argv[++i]);
+                        break;
+                    }
+                }
+            default:
+                printf("Invalid parameter");
+                break;
+            }
+        }
+    }
+}
+
+
+
 int main(int argc, char** argv)
 {
-	Sleep(1000);
+	Sleep(1000); // Wait for server to start
 
     char Buffer[BUFFER_SIZE], AddrName[NI_MAXHOST];
 
-    char* ServerAddress = DEFAULT_SERVER;
-    char* Port = DEFAULT_PORT;
+    char ServerAddress[DEFAULT_STRING_LENGTH];
+    char Port[DEFAULT_STRING_LENGTH];
+    char FileName[DEFAULT_STRING_LENGTH];
     
     int AddrLen;
     struct sockaddr_storage Addr;
     SOCKET ConnSocket = INVALID_SOCKET;
-
     int RetVal, AmountToSend;
-    int ExtraBytes = DEFAULT_EXTRA;
-    unsigned int Iteration, MaxIterations = 1;
-    BOOL RunForever = FALSE;
 
-	char* DateiName = "Example.txt";
-    ServerAddress = "::1";
-    Port = "50000";
+
+    parseArgs(argc, argv, FileName, ServerAddress, Port);
+    if (strlen(FileName) == 0 || strlen(ServerAddress) == 0 || strlen(Port) == 0) {
+        printf("File Name, Address or Port not specified!");
+        return -1;
+    }
 
     ConnSocket = createAndConnectClient(ServerAddress, Port);
     if (ConnSocket == INVALID_SOCKET)
@@ -208,52 +226,64 @@ int main(int argc, char** argv)
 
     
     // Open file
-    // 
     FILE* file;
-    errno_t err = fopen_s(&file, DateiName, "r");
+	char line[FILE_LINE_BUFFER_SIZE];
+
+    errno_t err = fopen_s(&file, FileName, "r");
     if (err != 0) {
-        printf("\n Unable to open : %s ", DateiName);
+        printf("\n Unable to open : %s ", FileName);
         return -1;
     }
-
-	char line[BUFFER_SIZE];
     
-    
-    //
-    // Send and receive in a loop for the requested number of iterations.
-    //
-    for (int i = 0; fgets(line, sizeof(line), file); i++) {
-		Package package;
-        package.seqNr = i;
-        
-        // Compose a message to send.
-		AmountToSend = sprintf_s(package.column, sizeof(package.column), line) + 2 * sizeof(int);
+    // Loop over each line of the file and send it in packages to the server
+    while (fgets(line, sizeof(line), file)) {
+        int numbOfPackagesToSend = strlen(line) / (PACKAGE_BUFFER_SIZE - 1);
+        for (int i = 0; i <= numbOfPackagesToSend; i++) {
+            Package package;
 
-        // Send the message.  Since we are using a blocking socket, this
-        // call shouldn't return until it's able to send the entire amount.
-        RetVal = send(ConnSocket, &package, AmountToSend, 0);
-        if (RetVal == SOCKET_ERROR) {
-            fprintf(stderr, "send() failed with error %d: %s\n",
-                WSAGetLastError(), PrintError(WSAGetLastError()));
-            WSACleanup();
-            return -1;
+            // Compose a Package to send.
+            if (strncpy_s(package.column, _countof(package.column), &line[i * (PACKAGE_BUFFER_SIZE - 1)], PACKAGE_BUFFER_SIZE - 1) != 0) {
+                printf("error copying string to package");
+                return -1;
+            }
+            package.seqNr = i;
+            package.checkSum = checksum(&package.column, sizeof(package.column));
+
+
+            // Send the Package
+            RetVal = send(ConnSocket, &package, sizeof(package), 0);
+            if (RetVal == SOCKET_ERROR) {
+                fprintf(stderr, "send() failed with error %d: %s\n",
+                    WSAGetLastError(), PrintError(WSAGetLastError()));
+                WSACleanup();
+                return -1;
+            }
+
+            printf("Sent Package: %d of Size: %d with Data: [%.*s]\n",
+                package.seqNr, RetVal, sizeof(package.column), package.column);
+
+            // Clear buffer
+            memset(Buffer, 0, sizeof(Buffer));
+
+            // Wait for ACKN
+            int AmountRead = recv(ConnSocket, Buffer, sizeof(Buffer), 0);
+            if (AmountRead == SOCKET_ERROR) {
+                fprintf(stderr, "recv() failed with error %d: %s\n",
+                    WSAGetLastError(), PrintError(WSAGetLastError()));
+                closesocket(ConnSocket);
+                WSACleanup();
+                return -1;
+            }
+            Ackn* ackn = (Ackn*)Buffer;
+
+            printf("Package with SeqNr: %d got acknowledged\n", ackn->seqNr);
         }
-
-        printf("Sent %d bytes (out of %d bytes) of data: [%.*s]\n",
-            RetVal, AmountToSend, AmountToSend, Buffer);
-
-        // Clear buffer just to prove we're really receiving something.
-        memset(Buffer, 0, sizeof(Buffer));
-
-        // Receive and print server's reply.
-        ReceiveAndPrint(ConnSocket, Buffer, sizeof(Buffer));
     }
-
-    // Tell system we're done sending.
     printf("Done sending\n");
     shutdown(ConnSocket, SD_SEND);
 
     closesocket(ConnSocket);
     WSACleanup();
+    fclose(file);
     return 0;
 }

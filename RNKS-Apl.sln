@@ -9,6 +9,9 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client", "Client\Client.vcx
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Common", "Common", "{9A4532FA-2208-4E37-BC5F-FF9CAC8B34FB}"
 	ProjectSection(SolutionItems) = preProject
+		ackn.h = ackn.h
+		checksum.c = checksum.c
+		checksum.h = checksum.h
 		Package.h = Package.h
 	EndProjectSection
 EndProject

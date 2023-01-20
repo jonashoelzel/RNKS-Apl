@@ -130,7 +130,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\checksum.c" />
     <ClCompile Include="Client.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Example.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\checksum.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

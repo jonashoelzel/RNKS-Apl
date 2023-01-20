@@ -18,5 +18,13 @@
     <ClCompile Include="Server.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\checksum.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\checksum.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
