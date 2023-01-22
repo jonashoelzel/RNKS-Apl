@@ -99,7 +99,7 @@ int main(int argc, char** argv)
     SOCKADDR_STORAGE From;
     WSADATA wsaData;
     ADDRINFO Hints, * AddrInfo;
-    SOCKET ServSock;
+    SOCKET ServSocket;
     fd_set SockSet;
 
     
@@ -132,8 +132,8 @@ int main(int argc, char** argv)
     }
 
     // Open a socket for this address
-    ServSock = socket(AddrInfo->ai_family, AddrInfo->ai_socktype, AddrInfo->ai_protocol);
-    if (ServSock == INVALID_SOCKET) {
+    ServSocket = socket(AddrInfo->ai_family, AddrInfo->ai_socktype, AddrInfo->ai_protocol);
+    if (ServSocket == INVALID_SOCKET) {
         fprintf(stderr, "socket() failed with error %d: %s\n",
             WSAGetLastError(), PrintError(WSAGetLastError()));
         return -1;
@@ -148,10 +148,10 @@ int main(int argc, char** argv)
     }
     
     // Bind to Socket
-    if (bind(ServSock, AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen) == SOCKET_ERROR) {
+    if (bind(ServSocket, AddrInfo->ai_addr, (int)AddrInfo->ai_addrlen) == SOCKET_ERROR) {
         fprintf(stderr, "bind() failed with error %d: %s\n",
             WSAGetLastError(), PrintError(WSAGetLastError()));
-        closesocket(ServSock);
+        closesocket(ServSocket);
         return -1;
     }
     freeaddrinfo(AddrInfo);
@@ -160,11 +160,12 @@ int main(int argc, char** argv)
     printf("'Listening' on port %s\n", Port);
 
 	// Loop forever and serve requests.
+    int expectedSeqNr = 0;
     FD_ZERO(&SockSet);
     while (1) {
         
-        if (!FD_ISSET(ServSock, &SockSet)) {
-            FD_SET(ServSock, &SockSet);
+        if (!FD_ISSET(ServSocket, &SockSet)) {
+            FD_SET(ServSocket, &SockSet);
             
             if (select(1, &SockSet, 0, 0, 0) == SOCKET_ERROR) {
                 fprintf(stderr, "select() failed with error %d: %s\n",
@@ -174,21 +175,22 @@ int main(int argc, char** argv)
             }
         }
         
-        if (FD_ISSET(ServSock, &SockSet)) {
-            FD_CLR(ServSock, &SockSet);
+        if (FD_ISSET(ServSocket, &SockSet)) {
+            FD_CLR(ServSocket, &SockSet);
         }
         
         FromLen = sizeof(From);
-        AmountRead = recvfrom(ServSock, Buffer, sizeof(Buffer), 0, (LPSOCKADDR)&From, &FromLen);
+		// Getting data from socket
+        AmountRead = recvfrom(ServSocket, Buffer, sizeof(Buffer), 0, (LPSOCKADDR)&From, &FromLen);
         if (AmountRead == SOCKET_ERROR) {
             fprintf(stderr, "recvfrom() failed with error %d: %s\n",
                 WSAGetLastError(), PrintError(WSAGetLastError()));
-            closesocket(ServSock);
+            closesocket(ServSocket);
             break;
         }
         if (AmountRead == 0) {
             printf("recvfrom() returned zero, aborting\n");
-            closesocket(ServSock);
+            closesocket(ServSocket);
             break;
         }
 
@@ -202,11 +204,19 @@ int main(int argc, char** argv)
 
 		Package* package = (Package*)Buffer;
         
-		writeToFile(FileName, package->column);
 
+        // Check sequence number
+        if (expectedSeqNr != package->seqNr && package->seqNr != 0) {
+            printf("Unexpected Sequence Number. Expected %d but got %d", expectedSeqNr, package->seqNr);
+            continue;
+        }
+        expectedSeqNr = package->seqNr + 1;
+
+		// Calculate checksum for column of received package
         unsigned short calcedCS = checksum(&package->column, sizeof(package->column));
         
-		if (calcedCS != package->checkSum) {
+		// Check if calculated checksum is sames as checksum in package
+		if ((calcedCS != package->checkSum)) {
 			printf("Checksum error for Package: %d, expected %d, got %d\n", package->seqNr, package->checkSum, calcedCS);
 		}
 		else {
@@ -215,11 +225,13 @@ int main(int argc, char** argv)
             Ackn ackn;
 			ackn.seqNr = package->seqNr;
             
-            RetVal = sendto(ServSock, &ackn, sizeof(ackn), 0, (LPSOCKADDR)&From, FromLen);
+            RetVal = sendto(ServSocket, &ackn, sizeof(ackn), 0, (LPSOCKADDR)&From, FromLen);
             if (RetVal == SOCKET_ERROR) {
                 fprintf(stderr, "send ackn failed with error %d: %s\n",
                     WSAGetLastError(), PrintError(WSAGetLastError()));
             }
+
+		    writeToFile(FileName, package->column);
 		}
         
     }
